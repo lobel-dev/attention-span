@@ -1,0 +1,8 @@
+{"type": "assistant", "isSidechain": false, "message": {"model": "claude-opus-4-8", "content": [{"type": "tool_use", "id": "r0", "name": "Read", "input": {"file_path": "/repo/main.py"}}]}}
+{"type": "assistant", "isSidechain": false, "message": {"model": "claude-opus-4-8", "content": [{"type": "tool_use", "id": "r1", "name": "Read", "input": {"file_path": "/repo/util.py"}}]}}
+{"type": "assistant", "isSidechain": false, "message": {"model": "claude-opus-4-8", "content": [{"type": "tool_use", "id": "e0", "name": "Edit", "input": {"file_path": "/repo/config.json"}}]}}
+{"type": "user", "isSidechain": false, "message": {"content": [{"type": "tool_result", "tool_use_id": "e0", "is_error": true, "content": "<tool_use_error>String to replace not found</tool_use_error>"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"model": "claude-opus-4-8", "content": [{"type": "tool_use", "id": "e1", "name": "Edit", "input": {"file_path": "/repo/config.json"}}]}}
+{"type": "user", "isSidechain": false, "message": {"content": [{"type": "tool_result", "tool_use_id": "e1", "is_error": true, "content": "<tool_use_error>String to replace not found</tool_use_error>"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"model": "claude-opus-4-8", "content": [{"type": "tool_use", "id": "e2", "name": "Edit", "input": {"file_path": "/repo/config.json"}}]}}
+{"type": "user", "isSidechain": false, "message": {"content": [{"type": "tool_result", "tool_use_id": "e2", "is_error": true, "content": "<tool_use_error>String to replace not found</tool_use_error>"}]}}

@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage*
+coverage.xml
+htmlcov/
+dist/
+.ruff_cache/
+.mypy_cache
+.venv/
+venv/
+
+# Local statusline cache / backups
+/tmp/claude-statusline-*
+*.replay.bak
+
+# Local dev
+/calibration/
+/tests/calibration/
+/tests/fixtures/calibration/
+/.claude/
+/tests/corpus_pins.py
