@@ -8,7 +8,7 @@ A Claude Code status line that tells you when to step in.
 
 It gives you one attention indicator at a time, guiding you to engineer around the physical and economic limitations of the model's context window.
 
-![The status line in a live session: PEAK health, 116K context load, 12% of the window used, 3 subagents working](assets/social-preview.jpg)
+![The status line in a live session, annotated: attention level PEAK, 116K context tokens, 12% of the window used, 3 subagents working on sonnet-5, turn 4](assets/social-preview.png)
 
 ## Why use this one?
 
