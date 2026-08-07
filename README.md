@@ -6,7 +6,7 @@ A Claude Code status line that tells you when to step in.
 
 It gives you one instruction at a time, guiding you to engineer around the physical and economic limitations of the model's context window.
 
-![The status line in a live session: PEAK health, 116K context load, 12% of the window used, 3 subagents working](assets/statusline.png)
+![The status line in a live session: PEAK health, 116K context load, 12% of the window used, 3 subagents working](assets/social-preview.jpg)
 
 ## Why use this one?
 
