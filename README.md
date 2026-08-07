@@ -1,10 +1,12 @@
 # Attention Span
 
+[![License](https://img.shields.io/github/license/lobel-dev/attention-span?v=2)](LICENSE)
+
 > Your model's attention span is shorter than its context window.
 
 A Claude Code status line that tells you when to step in.
 
-It gives you one instruction at a time, guiding you to engineer around the physical and economic limitations of the model's context window.
+It gives you one attention indicator at a time, guiding you to engineer around the physical and economic limitations of the model's context window.
 
 ![The status line in a live session: PEAK health, 116K context load, 12% of the window used, 3 subagents working](assets/social-preview.jpg)
 

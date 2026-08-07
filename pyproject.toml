@@ -1,8 +1,8 @@
 [project]
 name = "attention-span"
-version = "1.0.0"
+version = "1.0.1"
 description = "A Claude Code status line that tracks your model's attention span, not its context window."
-license = "0BSD"
+license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 # Stdlib-only on purpose: this runs inside the user's Claude Code process.
