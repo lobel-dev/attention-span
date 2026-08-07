@@ -23,8 +23,8 @@ It is not the most capable general status line:
 - Want a more minimal conventional model, context, and usage bar? Try
   [kcchien's statusline](https://github.com/kcchien/claude-code-statusline) or
   [nilbuild's statusline](https://github.com/nilbuild/claude-statusline).
-- Want usage tracking? A dedicated tool is hard to beat:
-  [ClaudeBar](https://github.com/tddworks/ClaudeBar) is highly recommended.
+- Want usage tracking? I highly recommend
+  [ClaudeBar](https://github.com/tddworks/ClaudeBar).
 - Want one recommended action based on effective context, session history, and
   subagent activity? That is what Attention Span is built for.
 
