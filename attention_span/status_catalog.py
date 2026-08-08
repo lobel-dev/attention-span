@@ -1,26 +1,17 @@
 """The catalog: one row per status, holding everything the statusline says about it.
 
-Before this module a status was declared five to seven times - a colour and glyph in
-``render._STATUS_STYLE``, an action in ``health_config.PUBLIC_ACTIONS``, a narrow-pane
-ladder in ``NARROW_ACTION_FALLBACKS``, a Row-1 branch in one if-chain, a Row-2 branch in
-another, plus three parallel tier maps. Adding a status meant finding all of them; drift
-between them was invisible until it shipped. Here a status is ONE ``StatusSpec``.
-
 A row declares WHEN it fires as well as what it says: ``fires`` is its own verdict over
-a ``RenderFacts`` and ``rank`` is its seat in the one precedence ladder. ``PRECEDENCE``
-walks those seats, so adding a status is still a single row - never an edit to a
-detector chain living somewhere else.
+a ``RenderFacts``, ``rank`` its seat in the one precedence ladder ``PRECEDENCE`` walks.
+Adding a status is one row here, never an edit to a detector chain living elsewhere.
 
 Two rules keep the module honest:
 
   * **No ANSI, ever.** Builders return structured records (``Instrument``, ``Reason``);
-    the renderer owns every colour decision, including the tier-coloured context value.
-  * **No engine tuning.** Bands, gates and the tier taxonomy stay in ``health_config``;
-    the predicates here READ those numbers, they never restate them.
+    the renderer owns every colour decision.
+  * **No engine tuning.** Bands, gates and the tier taxonomy live in ``health_config``;
+    the predicates here read those values, they never restate them.
 
-Builders take one argument - a ``RenderFacts`` - and are pure. They ARE what the two
-rows say, ordering quirks included (see ``_many_agents_detail``); the renderer only
-decides how to draw the records they return.
+Builders take one ``RenderFacts`` and are pure.
 """
 
 import math
@@ -38,14 +29,14 @@ CALM_STATUS = "Healthy"  # the foot of the ladder: nothing above it fired
 WARMING_STATUS = "Warming"  # cold start: context tracking has no reading yet
 NOTICE_STATUS = "Notice"  # the harness announced finished subagents
 COMPACT_ACK_STATUS = "Compact ack"  # shown by its own renderer entry point
-WARMING_ACTION = "WAIT FOR SESSION DATA"  # cold start: no transcript yet
-STANDBY_REASON = "No session data yet"  # narrow-pane reason under it
-COMPACT_ACK_ACTION = "COMPACT COMPLETE"  # post-/compact acknowledgement
+WARMING_ACTION = "WAIT FOR SESSION DATA"
+STANDBY_REASON = "No session data yet"  # the reason shown until a tier is read
+COMPACT_ACK_ACTION = "COMPACT COMPLETE"
 COMPACT_ACK_DETAIL = "CONTEXT UPDATES NEXT TURN"  # sentence-cased in narrow panes
 UNKNOWN_STATUS_ACTION = "CHECK STATUS"  # last resort for an unmapped status
 NOTICE_ACTION_TEMPLATE = "{} SUBAGENT{} FINISHED"
 FILE_DETAIL_COLS = 24
-RANK_NEVER = 999
+RANK_NEVER = 999  # out of the ladder entirely: PRECEDENCE stops below this
 
 
 @dataclass(frozen=True)
@@ -53,17 +44,14 @@ class StatusSpec:
     """One status, wholly declared: when it fires, how it looks, what it shows.
 
     ``fires`` is the row's own verdict over a ``RenderFacts``; ``rank`` is its seat in
-    the single precedence ladder, lower first. ``detail`` returns Row 1's instruments in
-    render order; ``reason`` returns Row 2's line, or ``None`` where the renderer leaves
-    it blank.
+    the single precedence ladder, lower wins. ``detail`` returns Row 1's instruments in
+    render order; ``reason`` returns Row 2's line, or ``None`` for a blank one.
 
     ``pseudo`` marks a row the renderer shows on its own authority rather than because a
-    detector concluded something - a notice, a cold start, the calm floor - which is
-    what keeps them out of ``active_warnings``.
+    detector concluded something; that is what keeps it out of ``active_warnings``.
 
-    ``sheds_context`` marks a row whose subject is NOT the context load. A pane too
-    tight to hold everything drops the context instruments from such a row rather than
-    the reading the status is actually about.
+    ``sheds_context`` marks a row whose subject is NOT the context load, so a pane too
+    tight to hold everything may drop its context instruments and keep the rest.
     """
 
     color: str
@@ -81,10 +69,9 @@ class StatusSpec:
 def _edit_retry_details(blind_loop: Mapping[str, Any] | None) -> tuple[str, str]:
     """The file and attempt count an engine edit-loop alert already carries.
 
-    ``agent_health.blind_loop_alert`` publishes ``base`` and ``count`` as fields, so
-    they are read as fields. The alert's ``chip`` is prose for the ``/health`` line and
-    nothing here looks at it. ``_sanitize`` runs again because the alert is an engine
-    dict this seam does not own, and no unscrubbed text may reach a terminal.
+    Read as fields, never parsed back out of the alert's prose. Sanitized again because
+    the alert is an engine dict this seam does not own, and no unscrubbed text may reach
+    a terminal.
     """
     alert = blind_loop or {}
     base = text.sanitize(alert.get("base") or "")
@@ -116,9 +103,8 @@ def _context_trusted(facts: render_facts.RenderFacts) -> bool:
     """Whether the context reading may be believed at all.
 
     THE one definition: a degraded parse invalidates the reading unless the harness
-    supplied a live sample. A tier that fired on an untrustworthy number would be a
-    verdict the row then refuses to show, so the predicate and the instruments read it
-    from here rather than each restating it.
+    supplied a live sample. Predicates and instruments both read it here, so no tier can
+    fire on a number the same row then refuses to print.
     """
     return (not facts.parse_degraded) or facts.context.is_live
 
@@ -128,9 +114,8 @@ def _context_display(
 ) -> tuple[tuple[render_facts.Instrument, ...], str]:
     """Row 1's context instruments and the joined value Row 2 falls back to.
 
-    Both rows read the same fact, so they are derived together: ``value`` is empty
-    exactly when the context is hidden or not trustworthy, which is what makes Row 2's
-    context reason disappear with the instruments rather than contradict them.
+    Derived together so the two rows cannot contradict each other: an empty value means
+    there are no instruments either, and Row 2's context reason disappears with them.
     """
     if not (facts.show_context and _context_trusted(facts)):
         return (), ""
@@ -156,11 +141,10 @@ def _context_instruments(
 def _foreign_model_chip(facts: render_facts.RenderFacts) -> str:
     """What the LIVE children run on, when that is news beside the session model.
 
-    One foreign label is named; two or more distinct labels become a count, because a
-    single named model would be an arbitrary pick the row cannot stand behind. A child
-    with no assistant turn yet has no model evidence and claims nothing. Distinctness
-    is judged on ``model_label`` so a context-window variant (opus-5 vs opus-5·1M)
-    counts as different, exactly like the identity row's ⇄ swap semantics.
+    One foreign label is named; two or more distinct labels become a count, because
+    naming one would be an arbitrary pick the row cannot stand behind. A child with no
+    assistant turn yet has no model evidence and claims nothing. Distinctness is judged
+    on the public label, so a context-window variant counts as a different model.
     """
     labels = {
         label
@@ -191,7 +175,7 @@ def _working_instruments(
 
 
 def _ambient(facts: render_facts.RenderFacts) -> tuple[render_facts.Instrument, ...]:
-    """The tail every status but ``Many agent runs`` shares: context, then working."""
+    """The ambient tail rows share: context, then working."""
     return _context_instruments(facts) + _working_instruments(facts)
 
 
@@ -218,10 +202,10 @@ def _token_instrument(
 def _file_instruments(
     facts: render_facts.RenderFacts,
 ) -> tuple[render_facts.Instrument, ...]:
-    """The looping file, capped at 24 columns with the ``×N`` suffix preserved.
+    """The looping file, column-capped with the ``×N`` suffix preserved.
 
-    The count is the actionable half of the detail - a name alone does not say the edit
-    is repeating - so the path yields columns to it, never the other way round.
+    The count is the actionable half - a name alone does not say the edit is repeating -
+    so the path yields columns to it, never the other way round.
     """
     file_name, count = _edit_retry_details(facts.blind_loop)
     count_text = " ×" + count if count else ""
@@ -237,7 +221,7 @@ def _file_instruments(
 def _calm_detail(
     facts: render_facts.RenderFacts,
 ) -> tuple[render_facts.Instrument, ...]:
-    """Nothing to report but the ambient readings: every calm and context status."""
+    """Nothing to report but the ambient readings."""
     return _ambient(facts)
 
 
@@ -275,12 +259,7 @@ def _cache_detail(
 def _many_agents_detail(
     facts: render_facts.RenderFacts,
 ) -> tuple[render_facts.Instrument, ...]:
-    """The one status that ends with context instead of leading with it.
-
-    Its subject is the child burn, so the burn instruments come first and the ambient
-    context sits last - which is also what makes context the first thing this status
-    sheds when the pane is tight.
-    """
+    """The one detail whose subject is the child burn: context sits last, not first."""
     return (
         (render_facts.Instrument("runs", f"{facts.agents_total}"),)
         + _token_instrument(facts)
@@ -306,7 +285,7 @@ def _parse_reason(facts: render_facts.RenderFacts) -> render_facts.Reason | None
 
 
 def _edit_loop_reason(facts: render_facts.RenderFacts) -> render_facts.Reason | None:
-    # Uncapped on purpose: Row 2 exists to show the whole path Row 1 had to abbreviate.
+    # Uncapped on purpose: Row 2 shows the whole path Row 1 had to abbreviate.
     file_name, _ = _edit_retry_details(facts.blind_loop)
     return render_facts.Reason("File: " + file_name) if file_name else None
 
@@ -357,10 +336,8 @@ def _notice_reason(facts: render_facts.RenderFacts) -> render_facts.Reason | Non
 def _calm_reason(facts: render_facts.RenderFacts) -> render_facts.Reason | None:
     """Standby, then the context load, then the window fill - the calm cascade.
 
-    Shared by ``Healthy``, ``Warming`` and every tier. The standby branch reads
-    ``context.tier is None`` where the renderer also tests ``status == "Healthy"``: a
-    tier status only exists BECAUSE the context names that tier, so the two conditions
-    cannot disagree on any state the renderer can reach.
+    Row 2 for any row whose subject is just the context state. No tier means no reading
+    has arrived, so the row says so rather than print a load of nothing.
     """
     context = facts.context
     if facts.show_context and context.tier is None:
@@ -388,7 +365,7 @@ def _no_reason(facts: render_facts.RenderFacts) -> render_facts.Reason | None:
 
 
 def _fires_never(facts: render_facts.RenderFacts) -> bool:
-    """A row the ladder never selects: the calm tiers, the compact acknowledgement."""
+    """A row the ladder never selects; the renderer reaches it directly."""
     return False
 
 
@@ -403,7 +380,7 @@ def _fires_health_stale(facts: render_facts.RenderFacts) -> bool:
 
 
 def _fires_edit_loop(facts: render_facts.RenderFacts) -> bool:
-    """The engine saw this session retry an edit blind - if it could read the file."""
+    """This session retried an edit blind, on a transcript that parsed cleanly."""
     return bool(not facts.parse_degraded and facts.blind_loop)
 
 
@@ -447,14 +424,7 @@ def _fires_calm(facts: render_facts.RenderFacts) -> bool:
 
 
 def _tier_fires(tier: str) -> Callable[[render_facts.RenderFacts], bool]:
-    """The predicate for one context tier: the load graded to THIS tier, and shown.
-
-    Only the alerting tiers get one - ``strong`` and ``peak`` are readings, not
-    verdicts - and only on a context reading the row would be willing to display, so a
-    tier can never claim a number the same row then declines to print.
-    """
-    if tier not in health_config.CONTEXT_FIRING_TIERS:
-        return _fires_never
+    """One tier's predicate: graded to THIS tier, on a reading the row would show."""
 
     def fires(facts: render_facts.RenderFacts) -> bool:
         return bool(
@@ -479,13 +449,20 @@ _TIER_ROWS: Mapping[str, tuple[str, str, str]] = MappingProxyType(
 )
 
 
-_TIER_RANK_BASE = 50
+# The calm half of the ladder: a reading, not an alert.
+_READING_TIERS: tuple[str, ...] = tuple(
+    tier
+    for tier in health_config.CONTEXT_TIERS
+    if tier not in health_config.CONTEXT_FIRING_TIERS
+)
 
-
-def _tier_rank(tier: str) -> int:
-    if tier not in health_config.CONTEXT_FIRING_TIERS:
-        return RANK_NEVER
-    return _TIER_RANK_BASE + health_config.CONTEXT_FIRING_TIERS.index(tier)
+# Every tier's seat, worst first within its half. Alerts sit mid-ladder; readings sit
+# below every warning, so a quiet context never masks one, and above the calm floor, so
+# a reading still gets to speak.
+_TIER_RANKS: Mapping[str, int] = MappingProxyType(
+    {tier: 50 + seat for seat, tier in enumerate(health_config.CONTEXT_FIRING_TIERS)}
+    | {tier: 91 + seat for seat, tier in enumerate(_READING_TIERS)}
+)
 
 
 def _tier_spec(tier: str) -> StatusSpec:
@@ -497,8 +474,9 @@ def _tier_spec(tier: str) -> StatusSpec:
         narrow=(UNKNOWN_STATUS_ACTION,),
         detail=_calm_detail,
         reason=_calm_reason,
-        rank=_tier_rank(tier),
+        rank=_TIER_RANKS[tier],
         fires=_tier_fires(tier),
+        pseudo=tier in _READING_TIERS,
     )
 
 
@@ -642,7 +620,7 @@ PRECEDENCE: tuple[tuple[str, StatusSpec], ...] = tuple(
 FALLBACK = StatusSpec(
     color="white",
     glyph="◌",
-    action="",  # derived per call by action_for(): the sanitized status, upper-cased
+    action="",  # unknown status: action_for() derives the text from the name
     narrow=(UNKNOWN_STATUS_ACTION,),
     detail=_no_detail,
     reason=_no_reason,
@@ -653,10 +631,10 @@ FALLBACK = StatusSpec(
 
 
 def active_warnings(facts: render_facts.RenderFacts) -> tuple[str, ...]:
-    """Every firing detector status and context tier, in precedence order.
+    """Every firing row a detector actually concluded, in precedence order.
 
-    Pseudo-statuses sit out: a notice, a cold start and the calm floor are rows the
-    renderer shows on its own authority, not conclusions a detector reached.
+    Pseudo rows sit out: they are shown on the renderer's own authority, so counting
+    them here would turn a quiet reading into a warning.
     """
     return tuple(
         name for name, spec in PRECEDENCE if not spec.pseudo and spec.fires(facts)
@@ -672,17 +650,13 @@ def dominant_status(facts: render_facts.RenderFacts) -> str:
 
 
 def resolve(status: str) -> StatusSpec:
-    """The row for ``status``, or the fallback row when nothing declares it.
-
-    ``"Notice"`` needs no special case here: it is a status name like any other now
-    that the notice crosses the seam as a record instead of as its own headline text.
-    """
+    """The row for ``status``, or the fallback row when nothing declares it."""
     spec = STATUSES.get(status) if isinstance(status, str) else None
     return spec if spec is not None else FALLBACK
 
 
 def notice_action(notice: render_facts.Notice | None) -> str:
-    """The action text for a finished-subagent notice: '3 SUBAGENTS FINISHED'."""
+    """The action text for a finished-subagent notice, pluralized on the count."""
     done = notice.done_n if notice else 0
     return NOTICE_ACTION_TEMPLATE.format(done, "" if done == 1 else "S")
 
@@ -690,8 +664,7 @@ def notice_action(notice: render_facts.Notice | None) -> str:
 def action_for(status: str, notice: render_facts.Notice | None = None) -> str:
     """The direct user action for a status - the whole of what Row 1's headline says.
 
-    A cold start is a row with a firing predicate; its action comes from the same
-    field as everyone else's.
+    Only the notice needs the count folded in; every other row states its own action.
     """
     if status == NOTICE_STATUS:
         return notice_action(notice)

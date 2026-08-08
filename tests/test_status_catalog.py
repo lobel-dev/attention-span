@@ -34,6 +34,7 @@ EXPECTED_KEYS = {
 }
 
 TIERS = ("dead", "failing", "degrading", "functional", "strong", "peak")
+CALM_TIERS = ("strong", "peak")  # the readings: every other tier is an alert
 
 
 def facts(**over):
@@ -136,19 +137,29 @@ class TestThePrecedenceLadder(unittest.TestCase):
             self.assertEqual(name in seated, reachable, name)
             if not reachable:
                 self.assertIs(spec.fires, catalog._fires_never, name)
+                self.assertFalse(spec.fires(facts()), name)
 
-    def test_the_firing_tiers_are_seated_worst_first(self):
+    def test_every_tier_is_seated_worst_first(self):
         seats = [
             name
             for name, _ in catalog.PRECEDENCE
             if name in health_config.CONTEXT_TIERS
         ]
-        self.assertEqual(seats, list(health_config.CONTEXT_FIRING_TIERS))
+        self.assertEqual(seats, list(health_config.CONTEXT_TIERS))
 
-    def test_the_calm_tiers_never_fire(self):
-        for tier in ("strong", "peak"):
-            self.assertFalse(catalog.STATUSES[tier].fires(facts(cx_state=tier)), tier)
-            self.assertNotEqual(catalog.dominant_status(facts(cx_state=tier)), tier)
+    def test_the_calm_tiers_report_without_outranking_anything_but_the_floor(self):
+        floor = catalog.STATUSES[catalog.CALM_STATUS].rank
+        others = [
+            spec.rank
+            for name, spec in catalog.PRECEDENCE
+            if name not in CALM_TIERS and name != catalog.CALM_STATUS
+        ]
+        for tier in CALM_TIERS:
+            with self.subTest(tier=tier):
+                spec = catalog.STATUSES[tier]
+                self.assertTrue(spec.fires(facts(cx_state=tier)))
+                self.assertGreater(spec.rank, max(others))
+                self.assertLess(spec.rank, floor)
 
     def test_exactly_one_row_sheds_its_context_under_pressure(self):
         shedders = [n for n, s in catalog.STATUSES.items() if s.sheds_context]
@@ -167,8 +178,10 @@ class TestThePrecedenceLadder(unittest.TestCase):
         ("Response truncated", {"last_stop_reason": "max_tokens"}),
         ("Response refused", {"last_stop_reason": "refusal"}),
         ("Cache problem", {"cache_health": {"show": True}}),
+        ("strong", {"cx_state": "strong"}),
+        ("peak", {"cx_state": "peak"}),
         (catalog.WARMING_STATUS, {}),
-        (catalog.CALM_STATUS, {"cx_state": "strong"}),
+        (catalog.CALM_STATUS, {"show_context": False}),
     )
 
     def test_every_row_fires_on_its_own_facts_and_wins_the_ladder(self):
@@ -216,10 +229,10 @@ class TestThePrecedenceLadder(unittest.TestCase):
         )
 
     def test_the_calm_floor_is_reached_only_when_nothing_else_fires(self):
-        self.assertEqual(catalog.active_warnings(facts(cx_state="strong")), ())
-        self.assertEqual(
-            catalog.dominant_status(facts(cx_state="strong")), catalog.CALM_STATUS
-        )
+        unclaimed = facts(cx_state="green")  # a grade no tier row declares
+
+        self.assertEqual(catalog.active_warnings(unclaimed), ())
+        self.assertEqual(catalog.dominant_status(unclaimed), catalog.CALM_STATUS)
 
     def test_all_concurrent_warnings_are_available_for_inspection(self):
 
@@ -275,6 +288,81 @@ class TestThePrecedenceLadder(unittest.TestCase):
 
         self.assertEqual(catalog.active_warnings(facts()), ())
         self.assertEqual(catalog.dominant_status(facts()), catalog.WARMING_STATUS)
+
+
+class TestTheCalmReadings(unittest.TestCase):
+    """``strong`` and ``peak`` are readings the ladder can select, never alerts.
+
+    They report the calm half of the context ladder, so they seat BELOW every warning -
+    a quiet context is not a reason to hide a truncated response - and above the calm
+    floor, which keeps its seat for the sessions that have no tier to show at all.
+    """
+
+    def test_a_trusted_strong_reading_headlines_still_sharp(self):
+        reading = facts(cx_state="strong")
+
+        self.assertEqual(catalog.dominant_status(reading), "strong")
+        self.assertEqual(catalog.action_for("strong"), "STILL SHARP")
+        self.assertEqual(catalog.STATUSES["strong"].glyph, "🌖")
+
+    def test_a_trusted_peak_reading_headlines_peak(self):
+        reading = facts(cx_state="peak")
+
+        self.assertEqual(catalog.dominant_status(reading), "peak")
+        self.assertEqual(catalog.action_for("peak"), "PEAK")
+        self.assertEqual(catalog.STATUSES["peak"].glyph, "🌕")
+
+    def test_a_reading_never_masks_a_truncated_response(self):
+        self.assertEqual(
+            catalog.dominant_status(
+                facts(cx_state="strong", last_stop_reason="max_tokens")
+            ),
+            "Response truncated",
+        )
+
+    def test_a_reading_never_masks_a_cache_problem(self):
+        self.assertEqual(
+            catalog.dominant_status(
+                facts(cx_state="peak", cache_health={"show": True, "hit_drop": 42})
+            ),
+            "Cache problem",
+        )
+
+    def test_a_reading_never_masks_a_notice(self):
+        notice = render_facts.Notice(done_n=3, live_n=2)
+
+        self.assertEqual(
+            catalog.dominant_status(facts(cx_state="strong", notice=notice)),
+            catalog.NOTICE_STATUS,
+        )
+
+    def test_an_alerting_tier_still_outranks_a_truncated_response(self):
+        self.assertEqual(
+            catalog.dominant_status(
+                facts(cx_state="functional", last_stop_reason="max_tokens")
+            ),
+            "functional",
+        )
+
+    def test_a_reading_fires_without_ever_counting_as_a_warning(self):
+        for tier in CALM_TIERS:
+            with self.subTest(tier=tier):
+                reading = facts(cx_state=tier)
+                self.assertTrue(catalog.STATUSES[tier].fires(reading))
+                self.assertTrue(catalog.STATUSES[tier].pseudo)
+                self.assertEqual(catalog.active_warnings(reading), ())
+
+    def test_a_hidden_context_reading_falls_through_to_the_calm_floor(self):
+        hidden = facts(cx_state="strong", show_context=False)
+
+        self.assertFalse(catalog.STATUSES["strong"].fires(hidden))
+        self.assertEqual(catalog.dominant_status(hidden), catalog.CALM_STATUS)
+
+    def test_an_untrusted_reading_yields_to_the_stale_health_row(self):
+        self.assertEqual(
+            catalog.dominant_status(facts(cx_state="strong", parse_degraded=True)),
+            "Health data stale",
+        )
 
 
 class TestTheRendererBindsTheCatalog(unittest.TestCase):
