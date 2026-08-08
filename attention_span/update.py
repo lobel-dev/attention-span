@@ -402,10 +402,10 @@ def install_archive(
     releases.mkdir(parents=True, exist_ok=True)
     release_dir = releases / (expected_version + "-" + archive_digest[:12])
     if not (release_dir.is_dir() and _release_matches(release_dir, payload)):
-        # This path is derived from the version and digest alone, so a partial directory
-        # left by a crashed install would otherwise fail every later run at the same
-        # place. The updater is detached and silent, so that would block this version
-        # forever. Discard whatever is there and re-stage from the verified payload.
+        # The path is derived from version and digest alone, so a partial directory left
+        # by a crashed install would fail every later run at the same place - and this
+        # updater is silent, so that would block the version forever. Discard whatever
+        # is there and re-stage from the verified payload.
         if os.path.lexists(str(release_dir)):
             _discard(release_dir)
         stage = Path(

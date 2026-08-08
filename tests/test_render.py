@@ -29,6 +29,7 @@ from attention_span import (
     status_catalog,
     subagents,
     text,
+    verdicts,
 )
 
 NOW = 1_700_000_000
@@ -149,10 +150,11 @@ class TestAmbientStatus(unittest.TestCase):
         )
         self.assertEqual(
             out,
-            "╭─ 🌕 PEAK ───  CONTEXT LOAD 50K"
+            "╭─ 🌖 STILL SHARP ───  CONTEXT LOAD 50K"
             "   WINDOW ██░░░░░░░░ 24%"
             "   WORKING 5\n"
-            "╰─ ~/dev/barnett-l/attention-span   ↺ 3          OPUS 4.8 / 1M · MAX",
+            "╰─ ~/dev/barnett-l/attention-span   ↺ 3                 "
+            "OPUS 4.8 / 1M · MAX",
         )
 
     def test_no_usage_fact_reaches_row_one_at_any_width(self):
@@ -180,7 +182,7 @@ class TestAmbientStatus(unittest.TestCase):
         out = self.panel(columns=120, model_id="claude-fable-5", effort="max")
         self.assertEqual(
             out.splitlines()[1],
-            "╰─ ↺ 3                                     FABLE 5 · MAX",
+            "╰─ ↺ 3                                            FABLE 5 · MAX",
         )
 
     def test_fast_mode_marks_the_identity_row_with_a_bolt(self):
@@ -200,9 +202,9 @@ class TestAmbientStatus(unittest.TestCase):
         )
         self.assertEqual(
             out,
-            "╭─ 🌕 PEAK ────────  CONTEXT LOAD 50K"
+            "╭─ 🌖 STILL SHARP ───  CONTEXT LOAD 50K"
             "   WINDOW ██░░░░░░░░ 24%\n"
-            "╰─ ~/dev/barnett-l/attention-span   ↺ 3   OPUS 4.8 / 1M · MAX",
+            "╰─ ~/dev/barnett-l/attention-span   ↺ 3     OPUS 4.8 / 1M · MAX",
         )
 
     def test_session_metadata_uses_repo_as_location_fallback(self):
@@ -213,7 +215,7 @@ class TestAmbientStatus(unittest.TestCase):
         )
         self.assertEqual(
             out.splitlines()[1],
-            "╰─ attention-span   ↺ 3              OPUS 4.8 / 1M · MAX",
+            "╰─ attention-span   ↺ 3                     OPUS 4.8 / 1M · MAX",
         )
 
     def test_identity_never_wears_a_context_tier_colour(self):
@@ -241,7 +243,7 @@ class TestAmbientStatus(unittest.TestCase):
     def test_no_active_agents_omits_working_count(self):
         self.assertEqual(
             self.panel(),
-            "╭─ 🌕 PEAK ───────────────────  CONTEXT LOAD 50K   WINDOW ██░░░░░░░░ 24%",
+            "╭─ 🌖 STILL SHARP ────────────  CONTEXT LOAD 50K   WINDOW ██░░░░░░░░ 24%",
         )
 
     def test_the_window_axis_sheds_before_the_token_count(self):
@@ -342,18 +344,28 @@ class TestAmbientStatus(unittest.TestCase):
                 self.assertTrue(out.startswith("╭─ " + headline), out)
                 self.assertIn("CONTEXT LOAD " + fmt(tokens), out)
 
-    def test_the_two_calm_tiers_never_claim_the_bay(self):
+    def test_the_two_calm_tiers_claim_the_bay_with_their_own_word(self):
 
-        for tokens, tier, shown in (
-            (LOAD_PEAK, "peak", LOAD_PEAK_S),
-            (LOAD_STRONG, "strong", LOAD_STRONG_S),
+        for tokens, tier, headline, shown in (
+            (LOAD_PEAK, "peak", "🌕 PEAK", LOAD_PEAK_S),
+            (LOAD_STRONG, "strong", "🌖 STILL SHARP", LOAD_STRONG_S),
         ):
             with self.subTest(tier=tier):
                 out = self.panel(
                     analysis(context_tokens=tokens), tier=tier, pct=PCT_LOW
                 )
-                self.assertTrue(out.startswith("╭─ 🌕 PEAK"), out)
+                self.assertTrue(out.startswith("╭─ " + headline), out)
                 self.assertIn("CONTEXT LOAD " + shown, out)
+
+    def test_a_graded_strong_session_headlines_still_sharp_not_peak(self):
+
+        graded, _ = verdicts.context_verdict(LOAD_STRONG)
+        self.assertEqual(graded, "strong")
+
+        out = self.panel(analysis(context_tokens=LOAD_STRONG), tier=graded, pct=PCT_LOW)
+
+        self.assertIn("STILL SHARP", out)
+        self.assertNotIn("PEAK", out)
 
     def test_context_cause_survives_from_thirty_two_to_forty_columns(self):
         for columns in (40, 39, 35, 32):
@@ -383,13 +395,13 @@ class TestAmbientStatus(unittest.TestCase):
         )
         self.assertEqual(
             wide,
-            "╭─ 🌕 PEAK ───────────────────  CONTEXT LOAD "
+            "╭─ 🌖 STILL SHARP ────────────  CONTEXT LOAD "
             + LOAD_STRONG_S
             + "   WINDOW ██████░░░░ "
             + str(PCT_MID)
             + "%",
         )
-        self.assertEqual(narrow, "╭ PEAK\n╰ Context load: " + LOAD_STRONG_S)
+        self.assertEqual(narrow, "╭ STILL SHARP\n╰ Context load: " + LOAD_STRONG_S)
 
     def test_the_load_fact_carries_the_tier_colour_and_the_window_never_does(self):
         pct = str(PCT_LOW) + "%"
@@ -656,7 +668,9 @@ class TestAmbientStatus(unittest.TestCase):
 
     def test_unknown_stop_reason_stays_healthy(self):
         self.assertTrue(
-            self.panel(analysis(last_stop_reason="future")).startswith("╭─ 🌕 PEAK")
+            self.panel(analysis(last_stop_reason="future")).startswith(
+                "╭─ 🌖 STILL SHARP"
+            )
         )
 
     def test_cache_degradation_is_not_healthy(self):
@@ -793,12 +807,12 @@ class TestAmbientStatus(unittest.TestCase):
         out = self.panel(pct=18)
         self.assertEqual(
             out,
-            "╭─ 🌕 PEAK ───────────────────  CONTEXT LOAD 50K   WINDOW █░░░░░░░░░ 18%",
+            "╭─ 🌖 STILL SHARP ────────────  CONTEXT LOAD 50K   WINDOW █░░░░░░░░░ 18%",
         )
 
     def test_without_percentage_falls_back_to_tokens(self):
         out = self.panel(pct=None, tokens=50_000)
-        self.assertEqual(out, "╭─ 🌕 PEAK ───────────────────  CONTEXT LOAD 50K")
+        self.assertEqual(out, "╭─ 🌖 STILL SHARP ────────────  CONTEXT LOAD 50K")
 
     def test_width_tiers_preserve_the_visual_grammar_and_never_wrap(self):
         agents = cohort(5)
@@ -807,11 +821,14 @@ class TestAmbientStatus(unittest.TestCase):
         narrow = self.panel(columns=24, cohort=agents)
         tiny = self.panel(columns=9, cohort=agents)
         self.assertIn("WORKING 5", wide)
-        self.assertEqual(medium, "╭ PEAK\n╰ Context load: 50K")
-        self.assertEqual(narrow, "PEAK")
+        self.assertEqual(medium, "╭ STILL SHARP\n╰ Context load: 50K")
+        self.assertEqual(narrow, "STILL SHARP")
         self.assertTrue(all(render.vis_len(line) <= 24 for line in narrow.splitlines()))
 
-        self.assertEqual(tiny, "PEAK")
+        # Nine columns cannot hold the word, so the tier row ellipsizes it - the same
+        # last resort FUNCTIONAL and the other long tier words already take.
+        self.assertEqual(tiny, "STILL SH…")
+        self.assertLessEqual(render.vis_len(tiny), 9)
         for output in (medium, narrow, tiny):
             self.assertNotIn("CTX", output)
             self.assertNotIn("5H", output)
@@ -846,7 +863,7 @@ class TestAmbientStatus(unittest.TestCase):
         )
         self.assertEqual(
             out,
-            "╭ PEAK\n╰ Context load: 50K",
+            "╭ STILL SHARP\n╰ Context load: 50K",
         )
         self.assertTrue(all(render.vis_len(line) <= 55 for line in out.splitlines()))
         for packed_label in ("CTX", "5H", "WK", "OPUS4.8"):
@@ -963,8 +980,10 @@ class TestSharedRightEdge(unittest.TestCase):
         )
         self.assertEqual(
             out,
-            "╭─ 🌕 PEAK ───  CONTEXT LOAD 108K   WINDOW █░░░░░░░░░ 11%   WORKING 1\n"
-            "╰─ ~/dev/lobel-dev/health   +37/-15   ↺ 3              FABLE 5 · HIGH",
+            "╭─ 🌖 STILL SHARP ───  CONTEXT LOAD 108K"
+            "   WINDOW █░░░░░░░░░ 11%   WORKING 1\n"
+            "╰─ ~/dev/lobel-dev/health   +37/-15   ↺ 3"
+            "                     FABLE 5 · HIGH",
         )
         self.assertEqual(*[render.vis_len(row) for row in out.splitlines()])
 
@@ -1019,7 +1038,7 @@ class TestSharedRightEdge(unittest.TestCase):
         self.assertEqual(len(out.splitlines()), 1)
         self.assertEqual(
             self.fill_width(out),
-            render.STATUS_BAY_WIDTH - render.vis_len("🌕 PEAK") - 1,
+            render.STATUS_BAY_WIDTH - render.vis_len("🌖 STILL SHARP") - 1,
         )
 
     def test_the_standby_row_aligns_with_the_identity_row(self):

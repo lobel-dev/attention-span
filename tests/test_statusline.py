@@ -231,7 +231,7 @@ class TestStatusline(unittest.TestCase):
                 "cost": {"total_cost_usd": 1.20},
             },
         )
-        self.assertIn("🌕 PEAK", proc.stdout)
+        self.assertIn("🌖 STILL SHARP", proc.stdout)
         self.assertIn("18%", proc.stdout)
         self.assertNotIn(" │ ", proc.stdout)
 
@@ -542,7 +542,7 @@ class TestStatusline(unittest.TestCase):
             },
         )
         self.assertNotIn("COMPACT COMPLETE", proc.stdout)
-        self.assertIn("PEAK", proc.stdout)
+        self.assertIn("STILL SHARP", proc.stdout)
         self.assertIn("WINDOW ░░░░░░░░░░ 5%", proc.stdout)
 
     def test_payload_rate_limits_are_ignored_entirely(self):
@@ -585,7 +585,7 @@ class TestStatusline(unittest.TestCase):
             },
         )
         self.assertEqual(proc.stderr, "")
-        self.assertIn("PEAK", proc.stdout)
+        self.assertIn("STILL SHARP", proc.stdout)
         self.assertFalse(os.path.exists(spawn_log))
 
     def test_cache_is_private_and_scoped_to_claude_home(self):
