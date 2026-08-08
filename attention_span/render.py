@@ -1,4 +1,8 @@
-"""Renderer for the attention-span statusline"""
+"""Renderer for the attention-span statusline.
+
+The catalog owns what a status says; this module owns how it is drawn - widths,
+colour, and the two rows' shared right edge.
+"""
 
 import math
 import re
@@ -46,11 +50,7 @@ _NO_COLOR = False
 
 @dataclass(frozen=True)
 class LayoutOpts:
-    """How the pane draws - not what the session is.
-
-    The two facts about the TERMINAL, kept apart from the session facts they constrain:
-    how many columns there are to spend, and whether colour may be spent at all.
-    """
+    """The pane, not the session: the terminal facts every row is drawn against."""
 
     columns: int | None = None
     no_color: bool = False
@@ -108,7 +108,7 @@ def _tier_spec(tier: str | None) -> Any | None:
 
 
 def context_status(tier: str | None) -> str:
-    """Return the public wording for a context tier: one bare status word."""
+    """The catalog's public wording for a context tier; '' when the tier is unknown."""
     spec = _tier_spec(tier)
     return spec.action if spec else ""
 
@@ -133,10 +133,10 @@ def render_standby_row(
     no_color: bool = False,
     target_width: int | None = None,
 ) -> str:
-    """Render the framed cold-start row without requiring transcript analysis.
+    """The framed cold-start row, drawn without any transcript analysis.
 
-    ``target_width`` is the visible width of the identity row the caller will join
-    below this one; absent, the bay keeps its fixed fallback width.
+    ``target_width`` is the visible width of the identity row joined below, so the two
+    share a right edge; absent, the bay keeps its default width.
     """
     global _NO_COLOR
     _NO_COLOR = no_color
@@ -163,10 +163,10 @@ def render_compact_row(
     no_color: bool = False,
     target_width: int | None = None,
 ) -> str:
-    """Acknowledge completed compaction while CC waits for the next live usage sample.
+    """Acknowledge a completed compaction while the next usage sample is still pending.
 
-    ``target_width`` aligns the row with the identity row joined below it, exactly as
-    in ``render_standby_row``; the trailing detail is charged to the same budget.
+    ``target_width`` aligns as in ``render_standby_row``; the trailing detail is
+    charged to the same budget.
     """
     global _NO_COLOR
     _NO_COLOR = no_color
@@ -203,11 +203,10 @@ def _fail_soft_count(value: Any) -> int:
 
 
 def _lines_changed(added: Any, removed: Any) -> str:
-    """'+123/-45' for the identity row, or '' when nothing changed.
+    """The identity row's '+N/-N' pair, or '' when nothing changed.
 
-    The counters are the harness's SESSION-CUMULATIVE totals (`cost.total_lines_*`):
-    every line this session ever edited, monotonic, unaffected by commits. Not a git
-    diff - a commit does not reset it, only a new session does.
+    SESSION-CUMULATIVE counters: every line this session ever edited, monotonic. Not a
+    git diff - a commit does not reset them, only a new session does.
     """
     added, removed = _fail_soft_count(added), _fail_soft_count(removed)
     if not added and not removed:
@@ -216,7 +215,7 @@ def _lines_changed(added: Any, removed: Any) -> str:
 
 
 def _turns_segment(turns: Any) -> str:
-    """'↺ 12' for the identity row; '' for absent, zero, or off-schema counts."""
+    """The identity row's turn counter; '' for absent, zero, or off-schema counts."""
     count = _fail_soft_count(turns)
     return dim(f"↺ {count}") if count else ""
 
@@ -251,8 +250,8 @@ def _location_budget(
 def _fit_location(repo_label: str, cwd_label: str, budget: int) -> tuple[str, str]:
     """Trim the repo and cwd labels into ``budget`` columns, cwd keeping its tail.
 
-    The repo name yields first (it is capped at a third of the budget) because the
-    working directory's END - where the session actually is - is the useful half.
+    The repo name yields first: the working directory's END - where the session
+    actually is - is the useful half.
     """
     separator = _LOCATION_SEPARATOR_COLS if repo_label and cwd_label else 0
     if vis_len(repo_label) + vis_len(cwd_label) + separator <= budget:
@@ -280,7 +279,7 @@ def render_metadata_row(
     no_color: bool = False,
     target_width: int | None = None,
 ) -> str:
-    """Compose the wide session-identity row from live statusline payload facts."""
+    """Compose the wide session-identity row from already-read payload facts."""
     global _NO_COLOR
     _NO_COLOR = no_color
     repo_label = _sanitize(repo_name)
@@ -339,7 +338,7 @@ def render_metadata_row(
     if not segments:
         return ""
     if segments == [turns_seg]:
-        # Turns alone never summons the row: no location or identity facts, no row.
+        # Turns alone never summons the row: no location and no identity, no row.
         return ""
 
     gaps = [SEGMENT_JOIN] * (len(segments) - 1)
@@ -357,7 +356,7 @@ def render_metadata_row(
 
 
 def _instrument_model_label(model_id: Any) -> str:
-    """Turn the compact engine label into a deliberate model identity."""
+    """The identity row's display form of the engine's compact model label."""
     label = agent_health.model_label(model_id)
     if not label:
         return ""
@@ -405,8 +404,8 @@ def _ramp_sgr(i: int, width: int) -> str:
 def bar(
     pct: float, width: int = 10, muted: bool = False, tier_color: str | None = None
 ) -> str:
-    """A gauge whose LENGTH is always the percentage. What colours the fill depends on
-    whether that percentage is itself a severity axis.
+    """A gauge whose LENGTH is always the percentage; the fill colour says whether that
+    percentage is itself a severity axis.
     """
     pct = max(0.0, min(100.0, pct))
     filled = max(0, min(width, int(pct * width / 100.0)))
@@ -435,12 +434,10 @@ _INSTRUMENT_LABELS: dict[str, tuple[str, Callable[[str], str]]] = {
 
 
 def render_panel(facts: RenderFacts, layout: LayoutOpts = DEFAULT_LAYOUT) -> str:
-    """Compose the framed action-first statusline.
+    """Compose the framed action-first statusline from one snapshot and one pane.
 
-    ``facts`` is the whole session: one ``render_facts.RenderFacts``, built where the
-    payload and the transcript are read. ``layout`` is the pane. The engine's Analysis
-    stays behind the assembly point in statusline.py - every fact the panel or the
-    status decision needs has already been read out of it into the snapshot.
+    The engine's ``Analysis`` never crosses this seam: every fact the panel or the
+    status decision needs is already in ``facts``.
     """
     global _NO_COLOR
     _NO_COLOR = layout.no_color

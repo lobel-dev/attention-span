@@ -61,44 +61,15 @@ def analyze_transcript(
     th: Mapping[str, Any] | None = None,
     include_sidechain: bool = False,
 ) -> Analysis:
-    """Single forward pass over a transcript. Returns an ``Analysis``:
+    """Single forward pass over one transcript; each field is documented on ``Analysis``.
 
-        reads, edits          - read/edit counts within the rolling window
-        total_reads, total_edits - lifetime counts (executed only; diagnostics)
-        r2e                   - reads/edits within the window (inf if no edits)
-        base_tier             - green | yellow | red from R2E alone
-        window_used           - read+edit events in the window
-        insufficient          - window_used < MIN_WINDOW (engine light off)
-        failed_edit_loop      - the ``EditLoop`` (file, count)
-        cache_health          - #1 cache-thrash verdict {hit_drop, churn_mult, show,
-                                thrash_score, window_turns, suppressed}
-        repetition            - #3 read-repetition ``Repetition``
-        perseveration         - #4 identical repeated tool calls ``Perseveration``
-        parse_health          - #2 self-doubt ``ParseHealth``; analyze_transcript-only
-                                (the drift-invariant carve-out)
-        last_model            - model id of the most recent real assistant turn
-        last_stop_reason      - stop_reason of the last assistant turn ("end_turn" = done)
-        compaction_pending    - latest driver compact summary has no later real assistant
-        turns                 - count of real (non-synthetic) user turns
-        context_tokens        - last assistant usage cache_read+cache_creation+input
-        usage_totals          - the ``UsageTotals``: cumulative message.usage sums,
-                                deduped LAST-WINS per API call (message.id -> requestId,
-                                any-distance; the (cr,cc,inp) tuple fallback
-                                consecutive-only)
-        max_error_bytes       - largest errored tool_result body (>2KB), else 0
-        task_notifications    - subagent task-id -> epoch seconds of its latest
-                                parent-side task-notification (a child stop this
-                                transcript witnessed; the cohort retires against it)
-        thinking_turns        - assistant turns that emitted a signed thinking block
-        assistant_turns       - substantive assistant turns (thinking denominator)
-        trailing_no_thinking  - consecutive recent substantive turns with no thinking
+    Two phases over ONE file read: the walk accumulates ordered events and result
+    provenance, then ``_finalize`` derives every verdict from that list. A read failure
+    never propagates: an unreadable file yields the nothing-known ``Analysis``, and a
+    mid-file failure is reported through ``parse_health``.
 
-    Two phases over ONE file read: Phase A accumulates ordered read/edit events
-    + result provenance (plus turns/context/error state); Phase B builds the
-    rolling window and blind-loop state from that list, EXCLUDING hook-denied
-    tool calls (which never executed). Subagent turns (isSidechain) are excluded
-    throughout — unless ``include_sidechain=True``, used to analyze a single-agent
-    child transcript whose every line is isSidechain.
+    Sidechain (subagent) turns are skipped unless ``include_sidechain``, which is how a
+    child transcript - every line of it a sidechain - is analyzed on its own.
     """
     state = _new_state()
     line_no = None
@@ -122,12 +93,11 @@ def iter_states(
     th: Mapping[str, Any] | None = None,
     at: str = "line",
 ) -> Iterator[tuple[dict[str, Any], Analysis]]:
-    """Yield ``(cursor, snapshot)`` after lines that change analysis state.
+    """Yield ``(cursor, snapshot)`` after each line that changes analysis state.
 
-    Cursor metadata includes settled read/edit events, so calibration can emit a
-    feature row only after execution status is known. PENDING read/edit events
-    still appear in live snapshots, matching ``analyze_transcript`` for trailing
-    in-flight tool uses.
+    The cursor reports which read/edit events SETTLED on that line, so a consumer can
+    wait for execution status before acting. PENDING events still appear in the
+    snapshot, matching ``analyze_transcript`` on trailing in-flight tool uses.
     """
     if at != "line":
         raise ValueError("iter_states currently supports at='line' only")
@@ -162,10 +132,8 @@ USAGE = "usage: agent_health.py <transcript.jsonl> [ctx_pct] [model_id] [window_
 def _cli_float(arguments: Sequence[str], index: int) -> float | None:
     """Positional argument ``index`` as a FINITE float, or None when absent/off-schema.
 
-    "nan"/"inf" parse as floats but are off-schema for both consumers: context_verdict
-    formats ctx_pct with int() (ValueError on nan, OverflowError on inf), and a
-    non-finite window size is never a real advertised window. Rejected HERE, at the
-    argv boundary, so no downstream caller has to re-check.
+    "nan"/"inf" parse as floats but are off-schema for every consumer, so they are
+    rejected HERE, at the argv boundary, and no callee has to re-check.
     """
     if len(arguments) <= index or not arguments[index]:
         return None
@@ -193,7 +161,7 @@ def _summary_line(
     stdin_model: str | None,
 ) -> str:
     """The one-line human verdict the debug CLI prints on stdout."""
-    # Imported HERE, never in the module body
+    # Local import: only this debug CLI may reach the presentation layer from here.
     from attention_span import status_catalog
 
     blind_loop = blind_loop_alert(analysis)

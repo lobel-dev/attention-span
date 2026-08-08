@@ -13,7 +13,7 @@ from typing import Any, NamedTuple, cast
 
 from attention_span import agent_health, render, render_facts, session_ui, subagents
 
-CACHE_TTL = 10  # seconds — the render cache window
+CACHE_TTL = 10  # seconds
 CACHE_SCHEMA = 6  # bump on any change to the entry format or the identity shape
 _state_dir = session_ui.state_dir
 _session_key = cast(Callable[[Any], str], session_ui.session_key)
@@ -24,7 +24,7 @@ _next_notice = cast(Callable[..., render_facts.Notice | None], session_ui.next_n
 
 
 def _num(v: Any) -> float | None:
-    """Parse to float, or None when missing/unparseable (mirrors the old jq/num())."""
+    """Parse to a FINITE float, or None when missing, unparseable or non-finite."""
     try:
         n = float(v)
     except (TypeError, ValueError, OverflowError):
@@ -154,9 +154,10 @@ def _session_identity(payload: Mapping[str, Any]) -> dict[str, str]:
 
 
 def _read_cache_if_fresh(cache: str, identity: Mapping[str, Any]) -> str | None:
-    """Return the cached render if it is younger than the TTL, else None. A cache hit
-    does ZERO filesystem writes (no cost/baseline work happens past this). Live session
-    identity is part of the cache contract so model/effort/location changes render now.
+    """The cached render while it is younger than the TTL, else None.
+
+    A hit does ZERO filesystem writes and skips all analysis. ``identity`` is part of
+    the cache contract, so any change it captures invalidates the entry at once.
     """
     try:
         if os.path.islink(cache):
@@ -204,10 +205,9 @@ class ContextFacts(NamedTuple):
 def _context_facts(cw: Mapping[str, Any]) -> ContextFacts:
     """Normalize the payload's ``context_window`` ONCE, for the render and the cache key.
 
-    Both callers read THIS, so the cache identity changes exactly when the rendered
-    context could - a second normalization would be free to drift from the first and
-    serve a stale panel. Every field is finite/JSON-safe (``_num`` rejects non-finite),
-    which the cache write requires (``allow_nan=False``).
+    Both readers call THIS, so the cache identity changes exactly when the rendered
+    context could; a second normalization would be free to drift and serve a stale
+    panel. Every field is JSON-safe, which the cache write requires.
     """
     size = _num(cw.get("context_window_size"))
     return ContextFacts(
@@ -228,9 +228,7 @@ class IdentityFacts(NamedTuple):
 def _identity_facts(payload: Mapping[str, Any]) -> IdentityFacts:
     """Normalize the payload's identity-row facts ONCE, for the render and cache key.
 
-    Same contract as ``_context_facts``: both callers read THIS, so the cache identity
-    changes exactly when the drawn row could. Every field is finite/JSON-safe (``_num``
-    rejects non-finite), which the cache write requires (``allow_nan=False``).
+    Same contract as ``_context_facts``.
     """
     cost = _as_dict(payload.get("cost"))
     return IdentityFacts(
@@ -241,9 +239,10 @@ def _identity_facts(payload: Mapping[str, Any]) -> IdentityFacts:
 
 
 def build_output(payload: Any) -> str | None:
-    """The pure-ish core: stdin payload dict -> the rendered panel string (or None to
-    stay silent). Does cost-baseline + subagent I/O but no caching/printing, so it is
-    directly unit-testable. Returns None when there is nothing to show."""
+    """Payload dict -> the rendered panel, or None when there is nothing to show.
+
+    Reads the transcript and its children but does no caching or printing, so it is
+    directly unit-testable."""
     if not isinstance(payload, dict):
         return None
     transcript = payload.get("transcript_path") or ""
@@ -340,9 +339,10 @@ def _envi(name: str) -> int | None:
 
 
 def main() -> None:
-    """Read stdin, serve the cache or render, write the cache, print. Silent on every
-    failure (the statusline must never crash). The cold-start marker is uncached so real
-    data replaces it the instant the first turn lands."""
+    """Read stdin, serve the cache or render, write the cache, print.
+
+    Silent on every failure: the statusline must never crash. The pre-transcript render
+    is uncached, so real data replaces it the moment the transcript appears."""
     try:
         raw_in = sys.stdin.read()
         payload = json.loads(raw_in) if raw_in.strip() else {}

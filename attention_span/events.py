@@ -214,7 +214,7 @@ def _classify_segment(seg: str) -> BashClassification:
         return "edit"
     if head in BASH_READ_HEADS:
         return "read"
-    return "neutral"  # builds, tests, runners, cd, echo — fail-safe bucket
+    return "neutral"  # builds, tests, runners, cd, echo - the fail-safe bucket
 
 
 def classify_bash(command: Any) -> BashClassification:
@@ -242,9 +242,8 @@ def classify_tool(
 ) -> BashClassification:
     """Classify a tool_use as read | edit | neutral.
 
-    Task/Agent/TodoWrite/ToolSearch/AskUserQuestion/Task*/mcp__*/unknown all fall
-    through to neutral — they are not read/edit behavior and never advance the
-    window.
+    Any tool outside ``READ_TOOLS``/``EDIT_TOOLS``/Bash is neutral: not read-or-edit
+    behavior, so it never advances the window.
     """
     if name in READ_TOOLS:
         return "read"
@@ -267,12 +266,10 @@ def _is_path_token(tok: str) -> bool:
 def _read_anchor(segments: Sequence[str], cwd: Any) -> str | None:
     """The directory a RELATIVE shell-read operand may resolve against, else None.
 
-    None means "refuse to anchor", leaving relative operands unresolvable as before.
-    Two conditions must both hold to anchor: the record carries a non-empty ABSOLUTE
-    `cwd` string (an off-schema or relative one tells us nothing), and NO segment of
-    the command changes directory (BASH_CHDIR_HEADS) - see that set for why. Leading
-    shell grouping chars are stripped before the head is matched so `(cd sub && cat f)`
-    guards too.
+    None means "refuse to anchor". Both conditions must hold: the record carries an
+    ABSOLUTE ``cwd`` (an off-schema or relative one tells us nothing), and no segment
+    changes directory. Leading shell grouping chars are stripped before the head is
+    matched, so `(cd sub && cat f)` guards too.
     """
     if not isinstance(cwd, str) or not os.path.isabs(cwd):
         return None
@@ -285,26 +282,21 @@ def _read_anchor(segments: Sequence[str], cwd: Any) -> str | None:
 def _bash_read_path(command: str, cwd: Any = None) -> str | None:
     """The one file a read-classified shell command dumps, normalized; else None.
 
-    Exists so an agent that rereads a failed file through the shell (`cat a.py`)
-    clears the blind-loop detector's pending failure exactly as a Read tool call
-    does. Wrong beats missing here ONLY in one direction: a path that accidentally
-    matched a pending file would silently suppress a TRUE alarm, so every ambiguity
-    resolves to None (status quo) instead of to a guess. Four rules enforce that:
+    Exists so a reread through the shell (`cat a.py`) clears the blind-loop detector's
+    pending failure exactly as a Read tool call does. A path that wrongly matched a
+    pending file would silently suppress a TRUE alarm, so every ambiguity resolves to
+    None instead of to a guess:
 
-      * only BASH_DUMP_HEADS segments are inspected (heads whose operands are files
-        whose content is dumped), split the same way ``classify_bash`` splits, so a
-        pipeline reads consistently under both;
-      * only literal extension-bearing tokens count as operands (``_is_path_token``),
-        which drops flags, flag values, sed scripts, globs and directories;
-      * a RELATIVE operand is anchored to the record's ``cwd`` - the common spelling
-        of the reread is `cat config.json`, which must still equal the Edit tool's
-        absolute `/repo/config.json`. When ``_read_anchor`` refuses (no usable cwd, or
-        the command moves directory) the whole command yields None rather than a
-        half-resolved guess: an unresolvable operand also destroys the one-file fact
-        the next rule needs;
-      * the whole command must name exactly ONE distinct file, counted AFTER anchoring.
-        Zero (`cat` of a pathless stream) and many (`head a.py b.py`) both yield None -
-        an event carries a single file_path, and picking one of several would be a guess.
+      * only ``BASH_DUMP_HEADS`` segments are inspected, split the way
+        ``classify_bash`` splits, so a pipeline reads consistently under both;
+      * only literal extension-bearing tokens count as operands, which drops flags,
+        flag values, sed scripts, globs and directories;
+      * a RELATIVE operand is anchored to the record's ``cwd``, because the reread is
+        usually spelled relatively and must still equal the Edit tool's absolute path.
+        When ``_read_anchor`` refuses, the whole command yields None rather than a
+        half-resolved guess;
+      * the command must name exactly ONE distinct file, counted AFTER anchoring: an
+        event carries a single file_path, so picking one of several would be a guess.
     """
     segments = [
         seg.strip() for seg in _SEGMENT_SPLIT_RE.split(_strip_heredocs(command))
@@ -333,10 +325,9 @@ def _tool_file_path(
 ) -> str | None:
     """The file a read/edit tool touches, normalized; None if not file-scoped.
 
-    ``cwd`` is the record's own working directory (the transcript line's `cwd` field);
-    it anchors relative operands of a shell read and is ignored by every other tool -
-    Edit/Read file_paths already arrive absolute. Off-schema or missing is fine: the
-    extractor then simply declines to anchor.
+    ``cwd`` is the record's own working directory. It anchors relative operands of a
+    shell read and is ignored by every other tool, whose paths already arrive absolute;
+    missing or off-schema simply means no anchoring.
     """
     inp = tool_input or {}
     p = None
@@ -359,11 +350,9 @@ def _tool_file_path(
 def _normalize_content(content: Any) -> str:
     """Flatten a tool_result content field (str or list of text parts) to a str.
 
-    A part's `text` is documented as a str but JSON permits an off-schema value
-    (null or a number). Coerce rather than pass through: a non-str item would
-    raise inside the join, and analyze_transcript's broad guard swallows it —
-    silently freezing every metric at the bad line. `str(... or "")` maps
-    None/falsy to "" and stringifies the rest.
+    Every part is coerced rather than passed through: a part's ``text`` is nominally a
+    str but JSON permits anything, and a non-str would raise inside the join - which
+    the caller's broad guard would swallow, freezing every metric at the bad line.
     """
     if isinstance(content, list):
         return "".join(str(c.get("text") or "") for c in content if isinstance(c, dict))
@@ -386,10 +375,9 @@ def _looks_like_hook_deny(body: str) -> bool:
 def classify_error(is_error: Any, content: Any) -> ErrorClassification:
     """Classify a tool_result's provenance: OK | HOOK_DENY | GENUINE.
 
-    `<tool_use_error>` is Claude Code's authoritative marker for a genuine tool
-    failure and wins outright. Otherwise hook/gate denials are filtered out so
-    they neither count as failed edits nor advance the R2E window. Any remaining
-    `is_error` (e.g. a bash non-zero exit) defaults to GENUINE.
+    ``<tool_use_error>`` is the harness's authoritative marker for a genuine failure
+    and wins outright. Otherwise hook/gate denials are separated out, since a denied
+    call never ran; anything else errored defaults to GENUINE.
     """
     if not is_error:
         return "OK"

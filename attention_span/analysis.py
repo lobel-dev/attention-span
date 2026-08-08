@@ -18,8 +18,8 @@ class EditLoop:
 class UsageTotals:
     """Cumulative ``message.usage`` sums, deduped LAST-WINS per API call.
 
-    Burn is a CONSUMER computation: ``input + cache_creation + output``. ``cache_read``
-    is excluded there - it is a re-read of the cached prefix, not new tokens.
+    Raw sums only. ``cache_read`` is kept apart from the rest because a re-read of the
+    cached prefix is not new spend, which is the distinction consumers grade on.
     """
 
     input: int = 0
@@ -31,10 +31,10 @@ class UsageTotals:
 
 @dataclass(frozen=True)
 class Repetition:
-    """Detector #3, read-repetition. Telemetry only - never displayed.
+    """Read-repetition. Diagnostic only: no part of the panel reads it.
 
-    ``score`` (== the worst no-progress re-read run length) is the monotonic
-    calibration column; a run >= REPEAT_MIN is "firing".
+    ``score`` is the worst no-progress re-read run length - monotonic, so a threshold
+    can be set against it later.
     """
 
     score: int = 0
@@ -44,12 +44,11 @@ class Repetition:
 
 @dataclass(frozen=True)
 class Perseveration:
-    """Detector #4, identical repeated tool calls. Telemetry only - never displayed.
+    """Identical repeated tool calls. Diagnostic only: no part of the panel reads it.
 
-    ``score`` (== the worst same-call/same-result run length) is the monotonic
-    calibration column; a run >= PERSEV_MIN is "firing". ``worst_target`` names the
-    TOOL that ran the worst run - the call signature itself is a digest and says
-    nothing a reader could act on.
+    ``score`` is the worst same-call/same-result run length - monotonic, so a threshold
+    can be set against it later. ``worst_target`` names the TOOL, not the call
+    signature, which is a digest a reader could not act on.
     """
 
     score: int = 0
@@ -59,13 +58,12 @@ class Perseveration:
 
 @dataclass(frozen=True)
 class ParseHealth:
-    """Detector #2, self-doubt: can this Analysis be trusted at all?
+    """Self-doubt: can this ``Analysis`` be trusted at all?
 
-    ``degraded`` is the one field consumers read - it degrades the row to honest
-    instead of showing a confident green over a half-analyzed transcript. The rest is
-    the evidence behind it. This is the ONE part of the Analysis carved out of the
-    ``iter_states`` drift invariant: ``decode_failures`` / ``parse_aborted`` are
-    counted in ``analyze_transcript``'s loop, which ``iter_states`` never runs.
+    ``degraded`` is the one field consumers read - it keeps a half-analyzed transcript
+    from being presented as a confident verdict; the rest is the evidence behind it.
+    The ONE part of an ``Analysis`` carved out of the ``iter_states`` drift invariant,
+    because the fields it counts are only reachable from ``analyze_transcript``'s loop.
     """
 
     decode_failures: int = 0
@@ -82,41 +80,36 @@ class Analysis:
     """The structured facts the engine derives from one pass over a transcript.
 
     The defaults describe an EMPTY transcript, so ``Analysis()`` is the honest
-    nothing-known value (insufficient window, no signal) rather than a partial one.
-
-    Read by the statusline (``context_tokens``, ``compaction_pending``), the renderer
-    (``parse_health``, ``cache_health``, ``last_stop_reason``, ``turns``), and the
-    cohort rollup (``usage_totals``, ``insufficient``, ``last_stop_reason``). The
-    remaining fields are the engine's own reasoning, kept because ``iter_states``
-    calibration and the debug CLI read them.
+    nothing-known value rather than a partial one.
 
     ``cache_health`` is the one detector result still a Mapping: it crosses into
-    ``render_facts.RenderFacts`` unchanged, and that seam's off-schema tolerance is
-    the status catalog's to own. Typing it belongs with that seam, not here.
+    ``render_facts`` unchanged, and tolerating an off-schema value there belongs to
+    that seam rather than here.
     """
 
     # The rolling read-to-edit window (R2E ratio)
     reads: int = 0
     edits: int = 0
-    total_reads: int = 0
+    total_reads: int = 0  # lifetime, executed calls only
     total_edits: int = 0
-    r2e: float = float("inf")
-    base_tier: str = "green"
-    window_used: int = 0
-    insufficient: bool = True
+    r2e: float = float("inf")  # reads/edits in the window; inf when no edits
+    base_tier: str = "green"  # green | yellow | red, from R2E alone
+    window_used: int = 0  # read+edit events the window actually holds
+    insufficient: bool = True  # too few events in the window to grade
     failed_edit_loop: EditLoop = EditLoop()
     cache_health: Mapping[str, Any] = field(default_factory=dict)
     repetition: Repetition = Repetition()
     perseveration: Perseveration = Perseveration()
     parse_health: ParseHealth = ParseHealth()
-    last_model: str | None = None
+    last_model: str | None = None  # model of the most recent real assistant turn
     last_stop_reason: str | None = None
-    compaction_pending: bool = False
-    turns: int = 0
-    context_tokens: int = 0
+    compaction_pending: bool = False  # compact summary with no later assistant turn
+    turns: int = 0  # real (non-synthetic) user turns
+    context_tokens: int = 0  # context the last real assistant turn occupied
     usage_totals: UsageTotals = UsageTotals()
-    max_error_bytes: int = 0
+    max_error_bytes: int = 0  # largest errored tool_result body; small ones ignored
+    # child task id -> epoch of the latest child stop this transcript witnessed
     task_notifications: Mapping[str, float] = field(default_factory=dict)
     thinking_turns: int = 0
-    assistant_turns: int = 0
-    trailing_no_thinking: int = 0
+    assistant_turns: int = 0  # substantive turns: the thinking denominator
+    trailing_no_thinking: int = 0  # latest substantive turns with no thinking

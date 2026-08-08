@@ -47,15 +47,13 @@ class Subagent:
 class Cohort:
     """A session's subagents taken together - live and done - plus their token burn.
 
-    Eight gathered facts; every count a reader wants is derived from them HERE, once,
-    so no consumer re-derives one of its own. ``live`` carries the expensive per-child
-    health detail for at most ``cap`` working children, which is why it is never the
-    count: ``live_n`` is the uncapped inventory. ``models`` is the sorted distinct
-    model ids of the UNFINISHED children (finished runs are history, and a child with
-    no assistant turn yet claims nothing); it reads the whole memo, so it is not
-    bounded by ``cap`` either. ``blind_loop_n`` counts the unfinished children known
-    to be red for the same reason: ``cap`` bounds displayed DETAIL, never the truth a
-    warning is drawn from - an old child in an edit loop still has to be actionable.
+    Gathered facts only: every count a reader wants is derived HERE, once, so no
+    consumer re-derives one of its own. ``live`` carries the expensive per-child health
+    detail for at most ``cap`` working children, which is why it is never the count -
+    ``live_n`` is the uncapped inventory. ``models`` and ``blind_loop_n`` describe the
+    UNFINISHED children and read the whole memo: ``cap`` bounds displayed DETAIL, never
+    the truth a warning is drawn from, since an old child in an edit loop still has to
+    be actionable. A child with no assistant turn yet claims no model.
     """
 
     live: tuple[Subagent, ...] = ()
@@ -90,9 +88,7 @@ def subagents_dir(parent_path: str | PathLike[str]) -> str:
 
 
 def discover(parent_path: str | PathLike[str]) -> list[str]:
-    """Child transcript paths for a session, or ``[]`` when none.
-    Excludes ``.meta.json``.
-    """
+    """Child transcript paths for a session, or ``[]`` when none."""
     d = subagents_dir(parent_path)
     if not os.path.isdir(d):
         return []
@@ -120,9 +116,8 @@ def _identity(path: str) -> dict[str, Any]:
     """The identity fields every ``Subagent`` carries: id plus its sidecar metadata.
 
     The sidecar is external JSON, so each field is typed HERE rather than trusted: an
-    off-schema value (a dict agentType, a string spawnDepth) becomes the not-known
-    default instead of landing inside a ``Subagent`` field it contradicts. bool is
-    excluded from spawn_depth because it is an int subclass.
+    off-schema value becomes the not-known default instead of landing in a field it
+    contradicts. bool is excluded from spawn_depth because it is an int subclass.
     """
     meta = read_meta(path)
     agent_type = meta.get("agentType")
@@ -178,9 +173,9 @@ def _read_memo(memo_path: str) -> dict[str, dict[str, Any]]:
 def _atomic_write_json(path: str, value: Mapping[str, Any]) -> None:
     """Replace ``path`` with ``value`` as JSON in one step; silent on any failure.
 
-    A statusline render may read the memo while a cohort() writes it, so a
-    truncating write would expose a half-written file. Deliberate twin of
-    session_ui._atomic_write — not shared, so neither module owns the other.
+    A render may read the memo while another writes it, so a truncating write would
+    expose a half-written file. A deliberate twin of ``session_ui``'s writer, kept
+    separate so neither module owns the other's state format.
     """
     tmp = None
     try:
@@ -288,11 +283,10 @@ def _is_done(
     """Whether a child has STOPPED: its own transcript proved ``end_turn``, or the
     parent recorded a task-notification for it no earlier than its last write.
 
-    The ONE effective-done predicate - ``done_n``, the ``live`` list and ``models`` all
-    read it, so no two counts can disagree. The memo's ``done`` keeps meaning
-    transcript-SELF-evidence only; the notification is applied HERE, per render, which
-    is what lets a resumed child - one whose transcript grew past its notification -
-    go straight back to working with no permanent bit to unset.
+    The ONE effective-done predicate, so no two counts can disagree. The memo's
+    ``done`` keeps meaning transcript-SELF-evidence only; the notification is applied
+    HERE, per render, which is what lets a resumed child - one whose transcript grew
+    past its notification - go back to working with no permanent bit to unset.
     """
     if entry["done"]:
         return True
@@ -310,11 +304,9 @@ def cohort(
     """The PERSISTENT subagent ``Cohort``: live children, done count, cumulative burn.
 
     Completion is derived from transcript state, never from a transcript's age.
-    ``notified`` is the parent's task-id -> latest-stop-time ledger
-    (``Analysis.task_notifications``), the only evidence for a child torn down before
-    its own transcript could record ``end_turn``.
-    ``cap`` bounds only the per-child health detail in ``live``; every count and the
-    blind-loop warning read the whole memo, so a child past the cap still counts.
+    ``notified`` is the parent's task-id -> latest-stop-time ledger, the only evidence
+    for a child torn down before its own transcript could record ``end_turn``. ``cap``
+    bounds only the per-child detail in ``live``; every count reads the whole memo.
     """
     stops: Mapping[str, float] = notified or {}
     try:

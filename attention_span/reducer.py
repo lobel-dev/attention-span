@@ -18,9 +18,9 @@ _TASK_ID_RE = re.compile(r"<task-id>([^<]*)</task-id>")
 def _cache_triple(usage: Mapping[str, Any]) -> tuple[int, int, int]:
     """The (cache_read, cache_creation, input) token trio of a ``message.usage``.
 
-    The ONE place those three keys are read; ``or 0`` guards null-valued keys. The int
-    annotation is the SCHEMA, not a coercion: JSON can still smuggle an off-schema value
-    through, which is what ``_usage_int`` exists to absorb at the accumulator.
+    The ONE place those three keys are read. The int annotation is the SCHEMA, not a
+    coercion: JSON can still smuggle an off-schema value through, which the accumulator
+    absorbs.
     """
     return (
         usage.get("cache_read_input_tokens", 0) or 0,
@@ -31,9 +31,8 @@ def _cache_triple(usage: Mapping[str, Any]) -> tuple[int, int, int]:
 
 def usage_tokens(usage: Any) -> int:
     """Context-window size from an assistant ``message.usage``: the canonical
-    cache_read + cache_creation + input sum (the schema's ``context_tokens``).
-    The single home for this formula — calibration imports it instead of
-    re-summing the keys."""
+    cache_read + cache_creation + input sum. The single home for this formula -
+    every consumer imports it instead of re-summing the keys."""
     cr, cc, inp = _cache_triple(usage or {})
     return cr + cc + inp
 
@@ -41,21 +40,19 @@ def usage_tokens(usage: Any) -> int:
 def _usage_int(v: Any) -> int:
     """An off-schema-tolerant token count: a non-bool int passes, anything else -> 0.
 
-    The usage_totals accumulator sums these, so a JSON-permitted-but-off-schema value
-    (a string, null, a float) must coerce rather than raise mid-pass (the same
-    philosophy as the existing usage read's ``or 0`` guards, one step stricter)."""
+    The totals accumulator sums these, so a JSON-permitted-but-off-schema value must
+    coerce rather than raise mid-pass and abort the walk."""
     return v if isinstance(v, int) and not isinstance(v, bool) else 0
 
 
 def _ts_epoch(ts: Any) -> float | None:
     """A transcript ISO-8601 timestamp -> epoch seconds (float), or None.
 
-    The ONE site that parses transcript timestamps (cache-health idle suppression
-    needs inter-turn gaps). Parsed HERE in the O(n) `_consume` pass and stored as a
-    number so `_finalize` — which re-runs per-emit in the O(n^2) `iter_states` walk —
-    only does arithmetic, never re-parses. Handles the Python-3.8 `fromisoformat`
-    gotcha (it rejects a trailing `Z` before 3.11) by normalizing `Z` -> `+00:00`.
-    Returns None on absent/off-schema input so callers degrade rather than crash.
+    The ONE site that parses transcript timestamps (the detectors that suppress on
+    idleness need inter-turn gaps). Parsed HERE in the single `_consume` pass and
+    stored as a number, because `_finalize` may re-run for every consumed line and
+    must only do arithmetic. None on absent/off-schema input so callers degrade
+    rather than crash.
     """
     if not ts or not isinstance(ts, str):
         return None
@@ -68,12 +65,11 @@ def _ts_epoch(ts: Any) -> float | None:
 def _digest(text: str) -> str:
     """A stable identity for a block of transcript text, compared but never read back.
 
-    Digested rather than kept whole because the perseveration call log holds one entry
-    per tool call for the whole session, and both the things it identifies - a Write's
-    input body, a Read's result - run to kilobytes. ``surrogatepass`` because a
-    transcript string can carry a lone surrogate (JSON permits a bare \\udXXX escape)
-    that plain UTF-8 encoding refuses, and an encode raised inside `_consume` would
-    abort the whole pass and silently freeze every metric at that line.
+    Digested rather than kept whole because the call log holds one entry per tool call
+    for the whole session and the bodies it identifies run to kilobytes.
+    ``surrogatepass`` because a transcript string can carry a lone surrogate (JSON
+    permits a bare \\udXXX escape) that plain UTF-8 encoding refuses, and an encode
+    raised mid-pass would abort the walk and freeze every metric at that line.
     """
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
 
@@ -81,17 +77,16 @@ def _digest(text: str) -> str:
 def _call_signature(name: Any, tool_input: Mapping[str, Any]) -> str:
     """The identity of one tool CALL: its tool name plus a digest of its input.
 
-    Sorted keys so two spellings of the same input compare equal. ``default=str``
-    absorbs a JSON-permitted-but-unexpected value rather than raising mid-pass, the
-    same off-schema philosophy as ``_usage_int``. Computed HERE in the O(n) `_consume`
-    pass, not in the detector, which re-runs per emit in the O(n^2) `iter_states` walk.
+    Sorted keys so two spellings of the same input compare equal; ``default=str``
+    absorbs an off-schema value rather than raising mid-pass. Computed HERE in the
+    single `_consume` pass, not in the detector, which re-runs per snapshot.
     """
     payload = json.dumps(tool_input, sort_keys=True, default=str)
     return f"{name}\x00{_digest(payload)}"
 
 
 def _new_state() -> dict[str, Any]:
-    """Create Phase-A accumulators for transcript analysis."""
+    """Create the accumulators one consume pass fills."""
     return {
         "ordered": [],
         "calls": [],
@@ -136,7 +131,7 @@ def _append_changed(changed: list[str], name: str) -> None:
 
 
 def _public_event(ev: Mapping[str, Any]) -> dict[str, Any]:
-    """Small, serializable read/edit event view for calibration cursors."""
+    """Small, serializable read/edit event view for cursor metadata."""
     return {
         "tool_use_id": ev.get("tool_use_id"),
         "event_index": ev.get("event_index"),
@@ -152,10 +147,9 @@ def _public_event(ev: Mapping[str, Any]) -> dict[str, Any]:
 def _is_thinking_block(it: Mapping[str, Any]) -> bool:
     """True if a content item is realized reasoning (a signed thinking block).
 
-    Key off the signature, not the `thinking` text: Claude Code stores the text
-    redacted (empty) but keeps the cryptographic signature, so signature presence
-    is the reliable evidence the model actually reasoned this turn. Encrypted
-    `redacted_thinking` blocks count too.
+    Key off the signature, not the `thinking` text: the text can arrive redacted
+    (empty) while the cryptographic signature remains, so the signature is the
+    reliable evidence the model actually reasoned this turn.
     """
     ty = it.get("type")
     if ty == "thinking":
@@ -228,8 +222,8 @@ def _apply_usage_contribution(
 ) -> None:
     """Fold one API call's usage into the running totals, superseding ``previous``.
 
-    A re-logged streaming line restates a call already counted, so its earlier
-    contribution is backed out in the same step (LAST-WINS) rather than double-counted.
+    A re-logged line restates a call already counted, so its earlier contribution is
+    backed out in the same step (LAST-WINS) rather than double-counted.
     """
     for key, value in contribution.items():
         totals[key] += value - (previous[key] if previous is not None else 0)
@@ -368,8 +362,8 @@ def _consume_tool_use(
     event_class = events.classify_tool(name, tool_input)
     tool_use_id = item.get("id")
 
-    # Logged BEFORE the read/edit gate (calls are neutral until they reach `ordered`)
-    # result state and body digest arrive later, in `_settle_tool_result`
+    # Logged BEFORE the read/edit gate: every call is in the call log, only read/edit
+    # calls reach `ordered`. Result state and body digest arrive with the tool result.
     call = {
         "tool_use_id": tool_use_id,
         "class": event_class,
@@ -453,8 +447,8 @@ def _injected_user_cursor(
 ) -> dict[str, Any] | None:
     """The cursor for a harness-injected user line, or None when it is a real turn.
 
-    A compact summary or meta line settles nothing and starts nothing; only the
-    compaction marker read before this point can have changed anything.
+    Such a line settles nothing and starts nothing; only what was read before this
+    point can have changed anything.
     """
     if not (obj.get("isCompactSummary") or obj.get("isMeta")):
         return None
@@ -466,13 +460,12 @@ def _consume_task_notification(
 ) -> None:
     """Record the LATEST stop time per task-id from a parent-side task-notification.
 
-    Gated on the ``origin.kind`` marker, never on the text: a compaction digest and a
-    pasted conversation log both carry whole notification blocks verbatim (observed
-    shapes), and neither says a live agent stopped. ``<status>`` is not read either -
-    the notification fires exactly when an agent stops, so a killed run is evidenced
-    the same way a finished one is. Keeping TIMES rather than a done bit is what lets
-    a resumed agent, which notifies again and writes again, be told apart from a
-    retired one.
+    Gated on the ``origin.kind`` marker, never on the text: a compaction digest or a
+    pasted conversation log can carry a whole notification block verbatim without a
+    live agent having stopped. ``<status>`` is not read either - the notification
+    fires exactly when an agent stops, so a killed run is evidenced like a finished
+    one. TIMES rather than a done bit, so an agent that resumes and notifies again is
+    distinguishable.
     """
     origin = obj.get("origin")
     if not isinstance(origin, Mapping) or origin.get("kind") != TASK_NOTIFICATION_KIND:
@@ -589,12 +582,11 @@ def _consume(
     line_no: int | None = None,
     include_sidechain: bool = False,
 ) -> dict[str, Any]:
-    """Consume one transcript object into Phase-A state and return cursor metadata."""
-    # `json.loads` accepts ANY JSON value, so a transcript line holding `"hello"`, `42`
-    # or `[1, 2]` decodes to a real (non-None) NON-mapping and arrives here. Skipping it
-    # is the only tolerant option: an AttributeError raised mid-pass aborts the whole
-    # walk (parse_aborted) and silently drops every LATER line. Same off-schema
-    # philosophy as `_usage_int` and the usage isinstance check.
+    """Consume one transcript object into ``state`` and return cursor metadata."""
+    # `json.loads` accepts ANY JSON value, so a line holding a bare scalar or list
+    # decodes to a real (non-None) NON-mapping and arrives here. Skipping it is the
+    # only tolerant option: an error raised mid-pass aborts the whole walk and
+    # silently drops every LATER line.
     if not isinstance(obj, Mapping):
         return _empty_cursor()
 
@@ -615,8 +607,8 @@ def _consume(
     if object_type == "assistant":
         _consume_assistant(state, obj, message, content, line_no, changed, new_events)
     elif object_type == "user":
-        # Read BEFORE the injected-line bail: a stop is terminal evidence whatever
-        # harness flags the line happens to carry.
+        # Read BEFORE the injected-line bail: a stop is evidence whatever flags the
+        # line happens to carry.
         _consume_task_notification(state, obj, content, changed)
         injected = _injected_user_cursor(obj, changed)
         if injected is not None:
@@ -631,7 +623,7 @@ def _finalize(
     window: Any = None,
     th: Mapping[str, Any] | None = None,
 ) -> Analysis:
-    """Build the public ``Analysis`` from Phase-A state. The ONE constructor."""
+    """Build the public ``Analysis`` from consumed state. The ONE constructor."""
     thresholds = health_config.resolve_thresholds(th)
     if window is None:
         window = int(thresholds["WINDOW"])

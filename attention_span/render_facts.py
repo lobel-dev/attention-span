@@ -7,7 +7,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class Instrument:
-    """One Row-1 reading: WHAT it is and its already-formatted value."""
+    """One Row-1 reading: ``kind`` picks how it is drawn, ``text`` is already worded."""
 
     kind: str
     text: str
@@ -15,7 +15,7 @@ class Instrument:
 
 @dataclass(frozen=True)
 class Reason:
-    """Row 2's one-line explanation, in plain text plus styling hints."""
+    """Row 2's one-line explanation: plain text plus styling hints, never ANSI."""
 
     text: str
     label: str = ""
@@ -35,7 +35,7 @@ class ContextLoad:
 
 @dataclass(frozen=True)
 class Notice:
-    """Transient announcement that subagents finished since the last render."""
+    """A finished-subagent announcement: ``done_n`` is newly finished, not a total."""
 
     done_n: int = 0
     live_n: int = 0
@@ -77,5 +77,5 @@ class RenderFacts:
     agents_tokens: Any = 0
     agents_tokens_complete: bool = True
     agents_tokens_warming: bool | None = None
-    # Distinct model ids of the unfinished children/subagents
+    # Distinct model ids of the unfinished children
     agents_models: tuple[str, ...] = ()

@@ -18,11 +18,9 @@ def parse_version(value: object) -> tuple[int, int, int]:
 
 
 def tag_for(version: str) -> str:
-    # Bare on purpose. The conventional v-prefixed names v1.0.0 and v1.0.1 were
-    # burned before launch: an accidental CI publish under immutable releases
-    # tombstones a tag name for the owner/name namespace permanently - surviving
-    # release deletion, setting changes, and even repository re-creation. The
-    # bare spelling is the only way release 1.0.0 can exist at all.
+    # Bare on purpose: this repo's v-prefixed tag names are already tombstoned.
+    # Publishing an immutable release burns that tag name for the owner/name
+    # namespace permanently, surviving release deletion and repository re-creation.
     parse_version(version)
     return version
 
@@ -42,4 +40,5 @@ def validate_payload_path(value: object) -> str:
 
 
 def payload_path_key(value: object) -> str:
+    """Collision key: two paths a filesystem could conflate share one key."""
     return unicodedata.normalize("NFC", validate_payload_path(value)).casefold()

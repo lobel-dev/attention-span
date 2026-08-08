@@ -1,13 +1,11 @@
 """Single source of truth for every health-status tuning value.
 
-Numbers and taxonomies only: the bands the engine grades against, the gates the
-renderer applies, and the tier vocabulary both share. What a status LOOKS and READS
-like - its colour, glyph, action and copy - lives in ``status_catalog``, one row per
-status; this module deliberately holds no status wording (``IDENTITY_JOIN`` is the
-identity row's punctuation, not a status string).
+Numbers and taxonomies only: the bands the engine grades against, the gates the renderer
+applies, and the tier vocabulary both share. What a status LOOKS and READS like lives in
+``status_catalog``, one row per status; no status wording belongs here.
 
-The module is a literals-only leaf: it imports no project module, so importing it can
-never introduce a failure mode into the silent-on-failure render path.
+A literals-only leaf: it imports no project module, so importing it can never introduce
+a failure mode into the silent-on-failure render path.
 """
 
 from collections.abc import Mapping
@@ -22,24 +20,27 @@ class EngineBands:
     WINDOW: int = 10  # rolling window size, in read+edit events (neutrals excluded)
     MIN_WINDOW: int = 5  # below this many read+edit events -> INSUFFICIENT (light off)
     MIN_EDITS_FOR_RED: int = (
-        3  # min-activity floor: no R2E-driven red unless >= this many edits
+        3  # min-activity floor: fewer edits than this cannot escalate the posture
     )
     HEALTHY: float = 1.0  # R2E >= HEALTHY -> green (reads keep pace with edits)
     BLIND: float = 0.5  # R2E <  BLIND   -> red; [BLIND, HEALTHY) -> yellow
 
-    CTX_TIER_STRONG: int = 32_000  # >= this -> STILL SHARP (no action)
-    CTX_TIER_FUNCTIONAL: int = 128_000  # >= this -> FUNCTIONAL · compact soon
-    CTX_TIER_DEGRADING: int = 200_000  # >= this -> DEGRADING · compact now
-    CTX_TIER_FAILING: int = 300_000  # >= this -> FAILING · distrust
-    CTX_TIER_DEAD: int = 600_000  # >= this -> DEAD · restart
+    # Base context ladder: a load >= a band opens that band's tier.
+    CTX_TIER_STRONG: int = 32_000
+    CTX_TIER_FUNCTIONAL: int = 128_000
+    CTX_TIER_DEGRADING: int = 200_000
+    CTX_TIER_FAILING: int = 300_000
+    CTX_TIER_DEAD: int = 600_000
 
+    # The 200K class is reasoned on its own, never a scaling of the base ladder: every
+    # tier it grades has to fire before that window's wall.
     CTX_TIER_FUNCTIONAL_200K: int = 80_000
     CTX_TIER_DEGRADING_200K: int = 128_000
     CTX_TIER_FAILING_200K: int = 160_000
     CTX_TIER_DEAD_200K: int = 192_000
 
     CACHE_WINDOW: int = 12  # trailing assistant turns scored for cache thrash
-    CACHE_WARM_TURNS: int = 3  # skip the first N turns — legit cache creation on warmup
+    CACHE_WARM_TURNS: int = 3  # skip the first N turns - warmup legitimately caches
     CACHE_IDLE_TTL_S: int = (
         300  # inter-turn gap (s) past which a cache miss is legit expiry
     )
@@ -86,11 +87,13 @@ CONTEXT_TIER_BANDS: Mapping[str, str] = MappingProxyType(
     }
 )
 
-# Every tier, worst -> best. Each name is also a ``status_catalog`` row
+# Every tier, worst -> best. Each name is also a ``status_catalog`` row.
 CONTEXT_TIERS: tuple[str, ...] = tuple(CONTEXT_TIER_BANDS) + ("peak",)
 
+# The tiers that are an alert; every other tier is a reading, shown without alarm.
 CONTEXT_FIRING_TIERS: tuple[str, ...] = ("dead", "failing", "degrading", "functional")
 
+# Advertised window size -> the class name that selects a ladder.
 WINDOW_CLASSES: Mapping[int, str] = MappingProxyType(
     {
         200_000: "200k",
@@ -98,6 +101,7 @@ WINDOW_CLASSES: Mapping[int, str] = MappingProxyType(
     }
 )
 
+# Per-class band swaps, tier -> field. An unlisted class or tier keeps the base band.
 CONTEXT_CLASS_BAND_OVERRIDES: Mapping[str, Mapping[str, str]] = MappingProxyType(
     {
         "200k": MappingProxyType(

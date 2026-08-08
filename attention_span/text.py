@@ -9,13 +9,11 @@ _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 
 def sanitize(s: Any) -> str:
-    """Strip C0/C1/DEL control chars (incl. ESC/BEL) from a host/repo-derived
-    string before it is rendered into the statusline — neutralizing ANSI/OSC
-    escape injection from a crafted file path or model id. Non-str -> "".
+    """Strip C0/C1/DEL control chars from a host-derived string; non-str -> "".
 
-    Applied at the RENDER seams only (the EDIT LOOP basename, the model-swap
-    chip), never at capture: a raw ``file_path`` is a dict key for same-file
-    blind-loop matching (`_failed_edit_loop`), so it must stay byte-for-byte.
+    Defends the terminal against ANSI/OSC escape injection through a crafted path or
+    model id. Applied at RENDER seams only, never at capture: a raw ``file_path`` is a
+    dict key for same-file matching, so it must stay byte-for-byte.
     """
     if not isinstance(s, str):
         return ""
@@ -43,7 +41,7 @@ _COMPACT_UNITS = (
 
 
 def compact_magnitude(value: Any) -> str:
-    """A bounded non-negative count for the terminal-pressure fallback."""
+    """Any count as a short unit-suffixed string, capped so it cannot overflow a cell."""
     try:
         n = max(0, int(value))
     except (TypeError, ValueError, OverflowError):

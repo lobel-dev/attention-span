@@ -87,9 +87,8 @@ def next_notice(
 ) -> render_facts.Notice | None:
     """Record cohort progress and return this render cycle's ``Notice``, or None.
 
-    The counts cross to the renderer as a record, never as the sentence they used to be
-    formatted into: this function decides HOW MANY finished, and the catalog decides
-    what to call them.
+    The counts cross to the renderer as a record, never as prose: this function decides
+    HOW MANY finished, and the catalog decides what to call them.
     """
     try:
         done_n = max(0, int(done_n or 0))
